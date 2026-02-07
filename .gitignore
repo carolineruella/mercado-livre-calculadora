@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Large data files (download separately - see README)
+tarifas-homologadas-distribuidoras-energia-eletrica.csv
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Temporary
+*.tmp
+*.log
