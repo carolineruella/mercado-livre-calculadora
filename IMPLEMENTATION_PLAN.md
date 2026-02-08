@@ -586,7 +586,7 @@ Right column (after submit):
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] App starts without import errors: `streamlit run app.py --server.headless true &; sleep 5; curl -s http://localhost:8501 | head -1; kill %1` (returns HTML)
+- [x] App starts without import errors: `streamlit run app.py --server.headless true &; sleep 5; curl -s http://localhost:8501 | head -1; kill %1` (returns HTML)
 
 #### Manual Verification:
 - [ ] Home page loads with title, description, market metrics
