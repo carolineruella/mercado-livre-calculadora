@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from pydantic import ValidationError
 
 from src.constantes import TIPO_ENERGIA, TIPO_ICMS, MESES_PT
 from src.models import (
@@ -40,6 +41,11 @@ def render_form(key_prefix: str, label: str):
     modalidade = st.selectbox("Modalidade", modalidades, key=f"{key_prefix}_mod")
 
     tarifas = obter_tarifas_vigentes(df_tarifas, distribuidora, subgrupo, modalidade)
+
+    if tarifas.tusd_kw_fp == 0.0 and tarifas.te_fp == 0.0:
+        st.warning(
+            f"Tarifas não encontradas para {distribuidora} / {subgrupo} / {modalidade}."
+        )
 
     c1, c2 = st.columns(2)
     with c1:
@@ -144,6 +150,19 @@ def build_params(d: dict) -> ParametrosSimulacao:
     )
 
 
+def _validar_cenario(d: dict, label: str) -> str | None:
+    """Validate a scenario dict. Returns error message or None."""
+    if d["consumo_hp"] + d["consumo_hfp"] == 0:
+        return f"{label}: informe ao menos um valor de consumo maior que zero."
+    if (d["ano_fim"] < d["ano_inicio"]) or (
+        d["ano_fim"] == d["ano_inicio"] and d["mes_fim"] < d["mes_inicio"]
+    ):
+        return f"{label}: o período final deve ser posterior ao período inicial."
+    if d["tipo_oferta"] == "Preço Determinado" and not d["precos_pd"]:
+        return f"{label}: informe ao menos um preço por ano."
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Two side-by-side forms
 # ---------------------------------------------------------------------------
@@ -158,60 +177,78 @@ with col_b:
 st.divider()
 
 if st.button("🔀 Comparar Cenários", use_container_width=True):
-    try:
-        params_a = build_params(dados_a)
-        params_b = build_params(dados_b)
+    # Validate both scenarios
+    erro_a = _validar_cenario(dados_a, "Cenário A")
+    erro_b = _validar_cenario(dados_b, "Cenário B")
+    if erro_a:
+        st.error(erro_a)
+    elif erro_b:
+        st.error(erro_b)
+    else:
+        try:
+            params_a = build_params(dados_a)
+            params_b = build_params(dados_b)
 
-        resultado_a = LogicaCalculadora(params_a).calcular()
-        resultado_b = LogicaCalculadora(params_b).calcular()
+            resultado_a = LogicaCalculadora(params_a).calcular()
+            resultado_b = LogicaCalculadora(params_b).calcular()
 
-        label_a = f"Cenário A ({dados_a['distribuidora']} - {dados_a['tipo_oferta']})"
-        label_b = f"Cenário B ({dados_b['distribuidora']} - {dados_b['tipo_oferta']})"
+            label_a = f"Cenário A ({dados_a['distribuidora']} - {dados_a['tipo_oferta']})"
+            label_b = f"Cenário B ({dados_b['distribuidora']} - {dados_b['tipo_oferta']})"
 
-        # --- Delta metrics ---
-        st.subheader("Comparação")
-        mc1, mc2, mc3 = st.columns(3)
+            st.toast("Comparação realizada com sucesso!", icon="✅")
 
-        mc1.metric(
-            "Desconto A vs B",
-            formatar_percentual(resultado_a["desconto_geral"]),
-            delta=f"{(resultado_a['desconto_geral'] - resultado_b['desconto_geral']) * 100:+.2f} p.p.",
-        )
-        mc2.metric(
-            "Economia Total A",
-            formatar_moeda(resultado_a["economia_total"]),
-            delta=formatar_moeda(resultado_a["economia_total"] - resultado_b["economia_total"]),
-        )
-        mc3.metric(
-            "Economia VPL A",
-            formatar_moeda(resultado_a["economia_vpl"]),
-            delta=formatar_moeda(resultado_a["economia_vpl"] - resultado_b["economia_vpl"]),
-        )
+            # --- Delta metrics ---
+            st.subheader("Comparação")
+            mc1, mc2, mc3 = st.columns(3)
 
-        # --- Grouped bar chart ---
-        fig_comp = criar_grafico_comparativo(resultado_a, resultado_b, label_a, label_b)
-        st.plotly_chart(fig_comp, use_container_width=True)
-
-        # --- Difference table ---
-        st.subheader("Detalhamento")
-        diff_data = {
-            "Métrica": ["Desconto Médio", "Economia Total", "Economia VPL", "Custo ACR Total", "Custo ACL Total"],
-            label_a: [
+            mc1.metric(
+                "Desconto A vs B",
                 formatar_percentual(resultado_a["desconto_geral"]),
+                delta=f"{(resultado_a['desconto_geral'] - resultado_b['desconto_geral']) * 100:+.2f} p.p.",
+            )
+            mc2.metric(
+                "Economia Total A",
                 formatar_moeda(resultado_a["economia_total"]),
+                delta=formatar_moeda(resultado_a["economia_total"] - resultado_b["economia_total"]),
+            )
+            mc3.metric(
+                "Economia VPL A",
                 formatar_moeda(resultado_a["economia_vpl"]),
-                formatar_moeda(sum(resultado_a["gastos_acr_anual"])),
-                formatar_moeda(sum(resultado_a["gastos_acl_anual"])),
-            ],
-            label_b: [
-                formatar_percentual(resultado_b["desconto_geral"]),
-                formatar_moeda(resultado_b["economia_total"]),
-                formatar_moeda(resultado_b["economia_vpl"]),
-                formatar_moeda(sum(resultado_b["gastos_acr_anual"])),
-                formatar_moeda(sum(resultado_b["gastos_acl_anual"])),
-            ],
-        }
-        st.dataframe(pd.DataFrame(diff_data), hide_index=True, use_container_width=True)
+                delta=formatar_moeda(resultado_a["economia_vpl"] - resultado_b["economia_vpl"]),
+            )
 
-    except Exception as e:
-        st.error(f"Erro ao comparar cenários: {e}")
+            # --- Grouped bar chart ---
+            fig_comp = criar_grafico_comparativo(resultado_a, resultado_b, label_a, label_b)
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+            # --- Difference table ---
+            st.subheader("Detalhamento")
+            diff_data = {
+                "Métrica": ["Desconto Médio", "Economia Total", "Economia VPL", "Custo ACR Total", "Custo ACL Total"],
+                label_a: [
+                    formatar_percentual(resultado_a["desconto_geral"]),
+                    formatar_moeda(resultado_a["economia_total"]),
+                    formatar_moeda(resultado_a["economia_vpl"]),
+                    formatar_moeda(sum(resultado_a["gastos_acr_anual"])),
+                    formatar_moeda(sum(resultado_a["gastos_acl_anual"])),
+                ],
+                label_b: [
+                    formatar_percentual(resultado_b["desconto_geral"]),
+                    formatar_moeda(resultado_b["economia_total"]),
+                    formatar_moeda(resultado_b["economia_vpl"]),
+                    formatar_moeda(sum(resultado_b["gastos_acr_anual"])),
+                    formatar_moeda(sum(resultado_b["gastos_acl_anual"])),
+                ],
+            }
+            st.dataframe(pd.DataFrame(diff_data), hide_index=True, use_container_width=True)
+
+        except ValidationError as e:
+            mensagens = []
+            for err in e.errors():
+                campo = " > ".join(str(loc) for loc in err["loc"])
+                mensagens.append(f"**{campo}**: {err['msg']}")
+            st.error("Erro de validação:  \n" + "  \n".join(mensagens))
+        except ZeroDivisionError:
+            st.error("Erro no cálculo: divisão por zero. Verifique os valores de consumo e tarifas.")
+        except Exception as e:
+            st.error(f"Erro ao comparar cenários: {e}")

@@ -73,7 +73,14 @@ class LogicaCalculadora:
         ano = self.ano_inicio
         ano_base = self.ano_inicio
 
+        # Guard: cap at 360 months (30 years) to prevent runaway loops
+        max_meses = 360
+        count = 0
+
         while (ano < self.ano_fim) or (ano == self.ano_fim and mes <= self.mes_fim):
+            if count >= max_meses:
+                break
+            count += 1
             anos_projecao = ano - ano_base
             fator = (1 + REAJUSTE_ANUAL_PADRAO) ** anos_projecao
 
@@ -294,7 +301,8 @@ class LogicaCalculadora:
         taxa_anual = (1 + self.taxa_mensal_vpl) ** 12 - 1
 
         if len(economias_anuais) > 0 and taxa_anual > 0:
-            self.economia_vpl = npf.npv(taxa_anual, economias_anuais)
+            vpl = npf.npv(taxa_anual, economias_anuais)
+            self.economia_vpl = vpl if np.isfinite(vpl) else sum(economias_anuais)
         else:
             self.economia_vpl = sum(economias_anuais)
 
